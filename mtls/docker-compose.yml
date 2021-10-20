@@ -1,0 +1,207 @@
+# Using version 2 as 3 does not support resource constraint options (cpu_*, mem_* limits) for non swarm mode in Compose
+version: "2"
+
+services:
+    alfresco:
+        build:
+          context: ./alfresco
+          args:
+            ALFRESCO_TAG: ${ALFRESCO_CE_TAG}
+            DB: postgres
+            SOLR_COMMS: https
+            TRUSTSTORE_TYPE: JCEKS
+            TRUSTSTORE_PASS: kT9X6oe68t
+            KEYSTORE_TYPE: JCEKS
+            KEYSTORE_PASS: kT9X6oe68t
+        mem_limit: 7488m
+        depends_on:
+            - postgres
+        environment:
+            JAVA_TOOL_OPTIONS: "
+                -Dencryption.keystore.type=JCEKS
+                -Dencryption.cipherAlgorithm=DESede/CBC/PKCS5Padding
+                -Dencryption.keyAlgorithm=DESede
+                -Dencryption.keystore.location=/usr/local/tomcat/shared/classes/alfresco/extension/keystore/keystore
+                -Dmetadata-keystore.password=mp6yc0UD9e
+                -Dmetadata-keystore.aliases=metadata
+                -Dmetadata-keystore.metadata.password=oKIWzVdEdA
+                -Dmetadata-keystore.metadata.algorithm=DESede
+                -Ddir.keystore=/usr/local/tomcat/alf_data/keystore
+                -Dalfresco.encryption.ssl.keystore.type=JCEKS
+                -Dalfresco.encryption.ssl.truststore.type=JCEKS
+                -Dssl-keystore.password=kT9X6oe68t
+                -Dssl-keystore.aliases=ssl-alfresco-ca,ssl-repo
+                -Dssl-keystore.ssl-alfresco-ca.password=kT9X6oe68t
+                -Dssl-keystore.ssl-repo.password=kT9X6oe68t
+                -Dssl-truststore.password=kT9X6oe68t
+                -Dssl-truststore.aliases=alfresco-ca,ssl-repo-client
+                -Dssl-truststore.alfresco-ca.password=kT9X6oe68t
+                -Dssl-truststore.ssl-repo-client.password=kT9X6oe68t
+            "
+            JAVA_OPTS : '
+                -Ddb.username=alfresco
+                -Ddb.password=alfresco
+                -Ddb.driver=org.postgresql.Driver
+                -Ddb.url=jdbc:postgresql://postgres:5432/alfresco
+                -Dsolr.host=solr6
+                -Dsolr.port.ssl=8983
+                -Dsolr.secureComms=https
+                -Dsolr.baseUrl=/solr
+                -Dindex.subsystem.name=solr6
+                -Dalfresco.host=${SERVER_NAME}
+                -Dalfresco.port=8080
+                -Dalfresco.protocol=http
+                -Dshare.host=${SERVER_NAME}
+                -Dshare.port=8080
+                -Dshare.protocol=http
+                -Daos.baseUrlOverwrite=http://${SERVER_NAME}/alfresco/aos
+                -Dmessaging.broker.url="failover:(nio://activemq:61616)?timeout=3000&jms.useCompression=true"
+                -Ddeployment.method=DOCKER_COMPOSE
+                -Dcsrf.filter.enabled=false
+                -Dopencmis.server.override=true
+                -Dopencmis.server.value=http://${SERVER_NAME}:8080
+                -DlocalTransform.core-aio.url=http://transform-core-aio:8090/
+                -Dcsrf.filter.enabled=false
+                -Dalfresco.restApi.basicAuthScheme=true
+                -Dauthentication.protection.enabled=false
+                -XX:+UseG1GC -XX:+UseStringDeduplication
+                -Dgoogledocs.enabled=false
+                -Xms6976m -Xmx6976m
+                -XX:MinRAMPercentage=50 -XX:MaxRAMPercentage=80
+            '
+        volumes:
+            - ./data/alf-repo-data:/usr/local/tomcat/alf_data
+            - ./logs/alfresco:/usr/local/tomcat/logs
+            - ./keystores/alfresco:/usr/local/tomcat/alf_data/keystore
+
+    transform-core-aio:
+        image: alfresco/alfresco-transform-core-aio:${TRANSFORM_ENGINE_TAG}
+        mem_limit: 1536m
+        environment:
+            JAVA_OPTS: " -XX:MinRAMPercentage=50 -XX:MaxRAMPercentage=80"
+
+    share:
+        build:
+          context: ./share
+          args:
+            SHARE_TAG: ${SHARE_TAG}
+            SERVER_NAME: ${SERVER_NAME}
+        mem_limit: 1872m
+        environment:
+            REPO_HOST: "alfresco"
+            REPO_PORT: "8080"
+            CSRF_FILTER_REFERER: "http://localhost/.*"
+            CSRF_FILTER_ORIGIN: "http://localhost"
+            JAVA_OPTS: "
+                -Xms1744m -Xmx1744m
+                -Dalfresco.context=alfresco
+                -Dalfresco.protocol=http
+                -XX:MinRAMPercentage=50 -XX:MaxRAMPercentage=80
+                "
+        volumes:
+            - ./logs/share:/usr/local/tomcat/logs
+
+
+    postgres:
+        image: postgres:${POSTGRES_TAG}
+        mem_limit: 1872m
+        environment:
+            - POSTGRES_PASSWORD=alfresco
+            - POSTGRES_USER=alfresco
+            - POSTGRES_DB=alfresco
+        command: "
+            postgres
+              -c max_connections=200
+              -c logging_collector=on
+              -c log_min_messages=LOG
+              -c log_directory=/var/log/postgresql"
+        ports:
+            - 5432:5432
+        volumes:
+            - ./data/postgres-data:/var/lib/postgresql/data
+            - ./logs/postgres:/var/log/postgresql
+
+    solr6:
+        build:
+          context: ./search
+          args:
+            SEARCH_TAG: $SEARCH_CE_TAG
+            SOLR_HOSTNAME: solr6
+            ALFRESCO_HOSTNAME: alfresco
+            ALFRESCO_COMMS: https
+            TRUSTSTORE_TYPE: JCEKS
+            KEYSTORE_TYPE: JCEKS
+            PASSWORDS_AS_ENV_VARS: "true"
+            CROSS_LOCALE: "true"
+        mem_limit: 3744m
+        environment:
+            #Solr needs to know how to register itself with Alfresco
+            SOLR_ALFRESCO_HOST: "alfresco"
+            SOLR_ALFRESCO_PORT: "8443"
+            ALFRESCO_SECURE_COMMS: https
+            #Alfresco needs to know how to call solr
+            SOLR_SOLR_HOST: "solr6"
+            SOLR_SOLR_PORT: "8983"
+            #Create the default alfresco and archive cores
+            SOLR_CREATE_ALFRESCO_DEFAULTS: "alfresco,archive"
+            SOLR_JAVA_MEM: "-Xms3488m -Xmx3488m"
+            SOLR_SSL_TRUST_STORE: "/opt/alfresco-search-services/keystore/ssl-repo-client.truststore"
+            SOLR_SSL_TRUST_STORE_PASSWORD: "kT9X6oe68t"
+            SOLR_SSL_TRUST_STORE_TYPE: "JCEKS"
+            SOLR_SSL_KEY_STORE: "/opt/alfresco-search-services/keystore/ssl-repo-client.keystore"
+            SOLR_SSL_KEY_STORE_PASSWORD: "kT9X6oe68t"
+            SOLR_SSL_KEY_STORE_TYPE: "JCEKS"
+            SOLR_SSL_NEED_CLIENT_AUTH: "true"
+            JAVA_TOOL_OPTIONS: "
+                -Dsolr.jetty.truststore.password=kT9X6oe68t
+                -Dsolr.jetty.keystore.password=kT9X6oe68t
+                -Dssl-keystore.password=kT9X6oe68t
+                -Dssl-keystore.aliases=ssl-alfresco-ca,ssl-repo-client
+                -Dssl-keystore.ssl-alfresco-ca.password=kT9X6oe68t
+                -Dssl-keystore.ssl-repo-client.password=kT9X6oe68t
+                -Dssl-truststore.password=kT9X6oe68t
+                -Dssl-truststore.aliases=ssl-alfresco-ca,ssl-repo,ssl-repo-client
+                -Dssl-truststore.ssl-alfresco-ca.password=kT9X6oe68t
+                -Dssl-truststore.ssl-repo.password=kT9X6oe68t
+                -Dssl-truststore.ssl-repo-client.password=kT9X6oe68t
+            "
+            SOLR_OPTS: "
+                -Dsolr.ssl.checkPeerName=false
+                -Dsolr.allow.unsafe.resourceloading=true
+            "
+        ports:
+            - 8983:8983
+        volumes:
+            - ./data/solr-data:/opt/alfresco-search-services/data
+            - ./keystores/solr:/opt/alfresco-search-services/keystore
+
+    activemq:
+        image: alfresco/alfresco-activemq:${ACTIVEMQ_TAG}
+        mem_limit: 1g
+        ports:
+            - 8161:8161 # Web Console
+            - 5672:5672 # AMQP
+            - 61616:61616 # OpenWire
+            - 61613:61613 # STOMP
+
+    content-app:
+        image: alfresco/alfresco-content-app:${ACA_TAG}
+        mem_limit: 256m
+        depends_on:
+            - alfresco
+            - share
+
+    # HTTP proxy to provide HTTP Default port access to services
+    # SOLR API and SOLR Web Console are protected to avoid unauthenticated access
+    proxy:
+        image: nginx:stable-alpine
+        mem_limit: 128m
+        depends_on:
+            - alfresco
+            - solr6
+            - share
+            - content-app
+        volumes:
+            - ./config/nginx.conf:/etc/nginx/nginx.conf
+        ports:
+            - 8080:8080
